@@ -3,22 +3,12 @@ import io
 import json
 import time
 import math
+import zipfile
 from typing import List, Dict, Tuple
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
-
-# Optional ML: try TensorFlow MobileNetV2; gracefully fall back if not available
-TF_AVAILABLE = True
-try:
-    import tensorflow as tf
-    from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, preprocess_input, decode_predictions
-except Exception:
-    TF_AVAILABLE = False
-
-# Video export
-from moviepy.editor import ImageSequenceClip, AudioFileClip
 
 APP_TITLE = "AI Smart Slideshow – Wedding (Streamlit)"
 DEFAULT_IMAGE_DIR = "hinhanh"
@@ -30,6 +20,17 @@ DEFAULT_AUDIO_CANDIDATES = [
 ]
 OUTPUT_VIDEO = "slideshow.mp4"
 FPS_EXPORT = 30
+
+# Try optional ML libs (graceful fallback)
+TF_AVAILABLE = True
+try:
+    import tensorflow as tf
+    from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, preprocess_input, decode_predictions
+except Exception:
+    TF_AVAILABLE = False
+
+# Do NOT import moviepy at module import time to avoid hard crash on missing deps
+MOVIEPY_AVAILABLE = None  # unknown until we try
 
 EFFECT_OPTIONS = [
     ("auto", "Tự động (ML/Heuristic)"),
@@ -263,7 +264,7 @@ with col2:
             f"{i+1}. {name}",
             options=[k for k, _ in EFFECT_OPTIONS],
             format_func=lambda k: dict(EFFECT_OPTIONS)[k],
-            index=[k for k, _ in EFFECT_OPTIONS].index(item.get("effect", "auto")),
+            index=[k for k, _ in EFFECT_OPTIONS].index(item.get("effect", "auto")) if item.get("effect", "auto") in dict(EFFECT_OPTIONS) else 0,
             key=f"eff_{i}"
         )
         new_effects.append(eff_label)
@@ -299,60 +300,99 @@ if st.button("▶ Xem thử (preview)"):
         preview_placeholder.image(frames, caption=f"Ảnh {i+1}/{len(images)} – {eff}")
         time.sleep(0.2)
 
-# Render MP4
+# Render MP4 (lazy import MoviePy here)
 st.subheader("Xuất video MP4")
 render_clicked = st.button("💾 Render MP4")
 progress = st.progress(0)
 status = st.empty()
 
+def try_import_moviepy():
+    global MOVIEPY_AVAILABLE
+    if MOVIEPY_AVAILABLE is not None:
+        return MOVIEPY_AVAILABLE
+    try:
+        from moviepy.editor import ImageSequenceClip, AudioFileClip  # noqa
+        MOVIEPY_AVAILABLE = True
+    except Exception as e:
+        MOVIEPY_AVAILABLE = False
+        st.error(f"Thiếu MoviePy hoặc phụ thuộc: {e}\\n→ Hãy thêm `moviepy>=1.0.3` vào requirements.txt trên Streamlit Cloud.")
+    return MOVIEPY_AVAILABLE
+
 if render_clicked:
-    frames_all = []
-    total = len(images)
-    for i, item in enumerate(images):
-        img = load_image_item(item).convert("RGB")
-        eff = item.get("effect", "auto")
-        if eff == "auto":
-            eff = choose_effect_auto(img)
-        duration = float(default_duration)
-        nframes = int(FPS_EXPORT * duration)
-        for f in range(nframes):
-            t = (f / max(1, nframes - 1)) * duration
-            frame = render_frame(img, eff, t, duration)
-            frame = overlay_texts(frame, names_line, lyric, marquee, t)
-            frames_all.append(np.array(frame))
-        progress.progress(int(((i + 1) / max(1, total)) * 100))
-        status.write(f"Đang dựng ảnh {i+1}/{total} – hiệu ứng {eff}")
+    if not try_import_moviepy():
+        # Offer fallback: download ZIP of frames
+        st.warning("Sẽ tạo gói ZIP các frame PNG để bạn render video ở máy khác (do thiếu MoviePy).")
+        frames_all = []
+        for i, item in enumerate(images):
+            img = load_image_item(item).convert("RGB")
+            eff = item.get("effect", "auto")
+            if eff == "auto":
+                eff = choose_effect_auto(img)
+            duration = float(default_duration)
+            nframes = int(FPS_EXPORT * duration)
+            for f in range(nframes):
+                t = (f / max(1, nframes - 1)) * duration
+                frame = overlay_texts(render_frame(img, eff, t, duration), names_line, lyric, marquee, t)
+                frames_all.append(frame)
 
-    clip = ImageSequenceClip(frames_all, fps=FPS_EXPORT)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for idx_f, fr in enumerate(frames_all):
+                img_bytes = io.BytesIO()
+                fr.save(img_bytes, format="PNG")
+                zf.writestr(f"frame_{idx_f:05d}.png", img_bytes.getvalue())
+        st.download_button("Tải frames.zip", data=buf.getvalue(), file_name="frames.zip", mime="application/zip")
+    else:
+        # Safe to import now
+        from moviepy.editor import ImageSequenceClip, AudioFileClip
 
-    audio_path = None
-    if audio_upload is not None:
-        # save uploaded to temp
-        audio_path = "_tmp_audio"
-        with open(audio_path, "wb") as f:
-            f.write(audio_upload.getvalue())
-    elif use_default_audio:
-        for cand in DEFAULT_AUDIO_CANDIDATES:
-            if os.path.exists(cand):
-                audio_path = cand
-                break
+        frames_all = []
+        total = len(images)
+        for i, item in enumerate(images):
+            img = load_image_item(item).convert("RGB")
+            eff = item.get("effect", "auto")
+            if eff == "auto":
+                eff = choose_effect_auto(img)
+            duration = float(default_duration)
+            nframes = int(FPS_EXPORT * duration)
+            for f in range(nframes):
+                t = (f / max(1, nframes - 1)) * duration
+                frame = render_frame(img, eff, t, duration)
+                frame = overlay_texts(frame, names_line, lyric, marquee, t)
+                frames_all.append(np.array(frame))
+            progress.progress(int(((i + 1) / max(1, total)) * 100))
+            status.write(f"Đang dựng ảnh {i+1}/{total} – hiệu ứng {eff}")
 
-    if audio_path:
-        try:
-            ac = AudioFileClip(audio_path)
-            # fit audio to clip length (loop or cut)
-            if ac.duration < clip.duration:
-                # simple loop by concatenating
-                loops = int(math.ceil(clip.duration / ac.duration))
-                ac = AudioFileClip(audio_path).fx(lambda gf, t: gf(t % ac.duration))
-            clip = clip.set_audio(ac.audio_fadein(0.2).audio_fadeout(0.5))
-        except Exception as e:
-            st.warning(f"Không thể ghép nhạc: {e}")
+        clip = ImageSequenceClip(frames_all, fps=FPS_EXPORT)
 
-    clip.write_videofile(OUTPUT_VIDEO, codec="libx264", audio_codec="aac", fps=FPS_EXPORT)
-    status.success("Xuất MP4 xong!")
-    with open(OUTPUT_VIDEO, "rb") as f:
-        st.download_button("Tải slideshow.mp4", data=f, file_name="slideshow.mp4", mime="video/mp4")
+        audio_path = None
+        if audio_upload is not None:
+            # save uploaded to temp
+            audio_path = "_tmp_audio"
+            with open(audio_path, "wb") as f:
+                f.write(audio_upload.getvalue())
+        elif use_default_audio:
+            for cand in DEFAULT_AUDIO_CANDIDATES:
+                if os.path.exists(cand):
+                    audio_path = cand
+                    break
+
+        if audio_path:
+            try:
+                ac = AudioFileClip(audio_path)
+                # fit audio to clip length (loop or cut)
+                if ac.duration < clip.duration:
+                    # simple loop by using a lambda that wraps time
+                    base_ac = ac
+                    ac = base_ac.fx(lambda gf, t: gf(t % base_ac.duration))
+                clip = clip.set_audio(ac.audio_fadein(0.2).audio_fadeout(0.5))
+            except Exception as e:
+                st.warning(f"Không thể ghép nhạc: {e}")
+
+        clip.write_videofile(OUTPUT_VIDEO, codec="libx264", audio_codec="aac", fps=FPS_EXPORT)
+        status.success("Xuất MP4 xong!")
+        with open(OUTPUT_VIDEO, "rb") as f:
+            st.download_button("Tải slideshow.mp4", data=f, file_name="slideshow.mp4", mime="video/mp4")
 
 # ============ Simple tests (run in app) ============
 with st.expander("✅ Self-tests"):
