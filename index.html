@@ -120,6 +120,7 @@
         <button class="btn secondary" id="btnPause">Tạm dừng</button>
         <button class="btn secondary" id="btnPrev">◀</button>
         <button class="btn secondary" id="btnNext">▶</button>
+        <button class="btn ghost" id="btnAutoLoad">Tự nạp thư mục hinhanh</button>
         <span class="muted" id="mlState">ML: đang tải mô hình…</span>
       </div>
     </header>
@@ -173,6 +174,7 @@ const lyricBox = document.getElementById('lyricBox');
 const lyricInner = document.getElementById('lyricInner');
 const exportLog = document.getElementById('exportLog');
 const downloadLink = document.getElementById('downloadLink');
+const btnAutoLoad = document.getElementById('btnAutoLoad');
 
 // ===== Helper: dynamic fallback loaders for external libs =====
 function loadScriptOnce(url){
@@ -186,16 +188,9 @@ function loadScriptOnce(url){
 }
 
 (async function ensureExternalLibs(){
-  // Fallback CDNs if primary blocked or offline then online again
-  if (!window.tf){
-    try { await loadScriptOnce('https://unpkg.com/@tensorflow/tfjs@4.20.0/dist/tf.min.js'); } catch(e){ console.warn(e.message); }
-  }
-  if (!window.mobilenet){
-    try { await loadScriptOnce('https://unpkg.com/@tensorflow-models/mobilenet@2.1.0'); } catch(e){ console.warn(e.message); }
-  }
-  if (!window.FFmpeg){
-    try { await loadScriptOnce('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js'); } catch(e){ console.warn(e.message); }
-  }
+  if (!window.tf){ try { await loadScriptOnce('https://unpkg.com/@tensorflow/tfjs@4.20.0/dist/tf.min.js'); } catch(e){ console.warn(e.message); } }
+  if (!window.mobilenet){ try { await loadScriptOnce('https://unpkg.com/@tensorflow-models/mobilenet@2.1.0'); } catch(e){ console.warn(e.message); } }
+  if (!window.FFmpeg){ try { await loadScriptOnce('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js'); } catch(e){ console.warn(e.message); } }
 })();
 
 // === Load TF model (with graceful fallback) ===
@@ -210,6 +205,41 @@ function loadScriptOnce(url){
   }
 })();
 
+// === Auto-load default music: "xứng đôi cưới thôi nhen" ===
+const DEFAULT_MUSIC_CANDIDATES = [
+  'xứng đôi cưới thôi nhen.mp3',
+  'xung doi cuoi thoi nhen.mp3',
+  'xung-doi-cuoi-thoi-nhen.mp3',
+  'nhac/xứng đôi cưới thôi nhen.mp3',
+  'nhac/xung doi cuoi thoi nhen.mp3',
+  'nhac/xung-doi-cuoi-thoi-nhen.mp3',
+  'audio/xứng đôi cưới thôi nhen.mp3',
+  'audio/xung doi cuoi thoi nhen.mp3',
+  'audio/xung-doi-cuoi-thoi-nhen.mp3'
+];
+
+async function probeAudioPath(p){
+  return new Promise((resolve)=>{
+    const a = new Audio();
+    a.preload = 'auto';
+    a.src = p;
+    const done = (ok)=>{ a.src=''; resolve(ok); };
+    a.addEventListener('canplaythrough', ()=> done(true), {once:true});
+    a.addEventListener('error', ()=> done(false), {once:true});
+  });
+}
+
+async function loadDefaultMusic(){
+  for (const p of DEFAULT_MUSIC_CANDIDATES){
+    try {
+      const ok = await probeAudioPath(p);
+      if (ok){ audioEl.src = p; audioEl.loop = true; audioEl.volume = parseFloat(vol.value || '0.6'); exportLog.textContent = `Đã nạp nhạc mặc định: ${p}`; return true; }
+    } catch(_){}
+  }
+  exportLog.textContent = 'Không tìm thấy nhạc mặc định. Bạn có thể chọn file bằng nút "♪ Nhạc nền".';
+  return false;
+}
+
 // === Inputs ===
 function readFiles(files){
   slides = [];
@@ -222,7 +252,7 @@ function readFiles(files){
 }
 fileInput.addEventListener('change', e => readFiles(e.target.files));
 
-// Audio load
+// Audio load (manual)
 audioInput.addEventListener('change', e =>{
   const f = e.target.files?.[0];
   if (!f) return;
@@ -231,7 +261,7 @@ audioInput.addEventListener('change', e =>{
 });
 
 btnAudioToggle.addEventListener('click', async ()=>{
-  if (!audioEl.src){ alert('Hãy chọn file nhạc nền.'); return; }
+  if (!audioEl.src){ await loadDefaultMusic(); if (!audioEl.src){ alert('Hãy chọn file nhạc nền.'); return; } }
   if (audioEl.paused){ await audioEl.play().catch(()=>{}); btnAudioToggle.textContent = 'Tắt nhạc'; }
   else { audioEl.pause(); btnAudioToggle.textContent = 'Phát nhạc'; }
 });
@@ -352,11 +382,10 @@ function startProgress(){
 }
 
 async function startShow(){
-  if (!slides.length){ alert('Hãy chọn ít nhất 1 ảnh.'); return; }
+  if (!slides.length){ alert('Chưa có ảnh nào. Hãy bấm "Tự nạp thư mục hinhanh" hoặc chọn ảnh thủ công.'); return; }
   running = true; clearStage(); await showSlide(idx); startProgress();
   clearInterval(timer);
   timer = setInterval(async ()=>{ if (!running) return; idx = (idx + 1) % slides.length; await showSlide(idx); startProgress(); }, DURATION_MS);
-  // đồng bộ audio
   if (audioEl.src && audioEl.paused) audioEl.play().catch(()=>{});
 }
 
@@ -368,6 +397,56 @@ btnPrev.addEventListener('click', async ()=>{ if (!slides.length) return; runnin
 // Drag-drop
 window.addEventListener('dragover', e=> e.preventDefault());
 window.addEventListener('drop', e=>{ e.preventDefault(); if (e.dataTransfer.files?.length){ readFiles(e.dataTransfer.files); }});
+
+// ============ Auto-load images from ./hinhanh/ ============
+async function fetchTextSafe(url){
+  try {
+    const r = await fetch(url, {cache:'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    return await r.text();
+  } catch(e){ return null; }
+}
+
+async function fetchJSONSafe(url){
+  try {
+    const r = await fetch(url, {cache:'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch(e){ return null; }
+}
+
+function parseDirListing(html){
+  const out = [];
+  if (!html) return out;
+  const re = /href=["']([^"']+\.(?:jpe?g|png|webp|gif))["']/ig;
+  let m; while ((m = re.exec(html))){ out.push(m[1]); }
+  return Array.from(new Set(out));
+}
+
+async function autoLoadHinhanh(){
+  // 1) manifest.json preferred
+  let list = await fetchJSONSafe('hinhanh/manifest.json');
+  if (Array.isArray(list) && list.length){
+    slides = list.map(name => ({url: 'hinhanh/' + name, name}));
+  } else {
+    // 2) try generic index listing (Apache/NGINX autoindex)
+    const indexHtml = await fetchTextSafe('hinhanh/');
+    const files = parseDirListing(indexHtml).filter(x=>/\.(?:jpe?g|png|webp|gif)$/i.test(x));
+    if (files.length){
+      slides = files.map(name => ({url: name.startsWith('hinhanh/')? name : ('hinhanh/' + name.replace(/^\.\//,'')), name: name.split('/').pop()}));
+    } else {
+      // 3) alternative file
+      list = await fetchJSONSafe('hinhanh/list.json');
+      if (Array.isArray(list) && list.length){
+        slides = list.map(name => ({url: 'hinhanh/' + name, name}));
+      }
+    }
+  }
+  info.textContent = `${slides.length} ảnh | Hiệu ứng: --`;
+  caption.textContent = slides.length ? 'Đã nạp ảnh từ ./hinhanh — bấm Bắt đầu' : 'Không tìm thấy ảnh trong ./hinhanh';
+}
+
+btnAutoLoad.addEventListener('click', autoLoadHinhanh);
 
 // ============ Recording (WebM) ============
 const recCanvas = document.createElement('canvas');
@@ -414,7 +493,7 @@ async function drawFrameToCanvas(){
 }
 
 async function recordWebM(){
-  if (!slides.length){ alert('Hãy chọn ảnh trước.'); return; }
+  if (!slides.length){ alert('Hãy nạp ảnh trước.'); return; }
   exportLog.textContent = 'Đang ghi…'; recordedChunks = [];
   const stream = recCanvas.captureStream(FPS_EXPORT);
 
@@ -463,7 +542,6 @@ async function ensureFFmpeg(){
     throw new Error('Bạn đang ngoại tuyến. Hãy kết nối Internet để tải FFmpeg.');
   }
   if (!window.FFmpeg){
-    // script tag failed – try alternate CDN
     try { await loadScriptOnce('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js'); }
     catch(e){ console.warn('FFmpeg script fallback failed:', e?.message || e); }
     if (!window.FFmpeg){
@@ -535,7 +613,7 @@ function runSelfTests(){
     log('createSlide structure', !!ok);
   } catch(e){ log('createSlide structure', false, e.message); }
 
-  // New tests: lyric toggle + names rendering basics (no network)
+  // New tests: names + lyric
   try {
     document.getElementById('groom').value = 'Anh';
     document.getElementById('bride').value = 'Em';
@@ -546,21 +624,30 @@ function runSelfTests(){
   } catch(e){ log('updateNames renders names + date', false, e.message); }
 
   try {
-    document.getElementById('lyric').value = 'Từng là tất cả';
+    document.getElementById('lyric').value = 'Xứng đôi cưới thôi nhen';
     document.getElementById('chkMarquee').checked = true; updateLyric();
-    const ok = lyricBox.classList.contains('marquee') && /Từng là/.test(lyricInner.textContent);
+    const ok = lyricBox.classList.contains('marquee') && /Xứng đôi/.test(lyricInner.textContent);
     log('Lyric marquee toggle ON', ok);
     document.getElementById('chkMarquee').checked = false; updateLyric();
     const ok2 = !lyricBox.classList.contains('marquee');
     log('Lyric marquee toggle OFF', ok2);
   } catch(e){ log('Lyric marquee toggle', false, e.message); }
 
+  // New tests: directory listing parser
+  try {
+    const html = '<a href="img1.jpg">img1</a> <a href="sub/img2.png">img2</a> <a href="doc.pdf">doc</a>';
+    const files = parseDirListing(html);
+    const ok = files.includes('img1.jpg') && files.includes('sub/img2.png') && !files.includes('doc.pdf');
+    log('parseDirListing images only', ok, JSON.stringify(files));
+  } catch(e){ log('parseDirListing images only', false, e.message); }
+
   const okCount = results.filter(r=>r.ok).length;
   const total = results.length;
   exportLog.textContent = `Self-tests: ${okCount}/${total} passed`;
 }
 
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', runSelfTests); else runSelfTests();
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', async ()=>{ runSelfTests(); await loadDefaultMusic(); /* optional auto-load images here if bạn muốn */ });
+else { runSelfTests(); loadDefaultMusic(); }
 </script>
 </body>
 </html>
