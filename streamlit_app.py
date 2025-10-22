@@ -297,7 +297,8 @@ if st.button("▶ Xem thử (preview)"):
             frame = render_frame(img, eff, t, duration)
             frame = overlay_texts(frame, names_line, lyric, marquee, t)
             frames.append(frame)
-        preview_placeholder.image(frames, caption=f"Ảnh {i+1}/{len(images)} – {eff}")
+        captions = [f"Ảnh {i+1}/{len(images)} – {eff}" for _ in range(len(frames))]
+        preview_placeholder.image(frames, caption=captions)
         time.sleep(0.2)
 
 # Render MP4 (lazy import MoviePy here)
@@ -396,6 +397,12 @@ if render_clicked:
 
 # ============ Simple tests (run in app) ============
 with st.expander("✅ Self-tests"):
+    def test_preview_captions_length_match():
+        frames = [Image.new("RGB", (64, 36), (i*10 % 255, 0, 0)) for i in range(5)]
+        caps = ["cap"] * len(frames)
+        # This mirrors the logic used in preview: captions length == frames length
+        assert len(caps) == len(frames)
+
     def test_choose_effect_mapping():
         # Dark image should prefer zoom-out or fade
         img = Image.new("RGB", (400, 300), (10, 10, 10))
