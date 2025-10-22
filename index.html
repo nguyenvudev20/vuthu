@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Smart Slideshow – Wedding Edition</title>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap&family=Great+Vibes&display=swap" rel="stylesheet">
+  
+  <!-- Primary CDNs -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js"></script>
+  
+  <style>
+    :root{
+      --bg:#0f0f13; --fg:#eaeaf2; --muted:#a0a3b1; --accent:#ff7ab6;
+      --card:#161821; --shadow:0 20px 60px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; background:radial-gradient(1200px 1200px at 70% 20%, #171a24 0%, #0f1118 60%, #0b0c12 100%);
+      color:var(--fg); font-family:Poppins,system-ui,-apple-system,Segoe UI,Roboto,Arial; overflow:hidden;
+    }
+
+    /* Layout */
+    .wrap{display:grid; grid-template-rows:auto 1fr auto; height:100%;}
+    header, footer{display:flex; align-items:center; justify-content:space-between; padding:10px 16px; gap:12px;}
+    header{backdrop-filter: blur(6px); background:linear-gradient(180deg, rgba(10,10,16,.6), rgba(10,10,16,0)); flex-wrap:wrap}
+    footer{backdrop-filter: blur(6px); background:linear-gradient(0deg, rgba(10,10,16,.6), rgba(10,10,16,0)); flex-wrap:wrap}
+    .brand{display:flex; align-items:center; gap:10px; font-weight:600; letter-spacing:.3px}
+    .brand .dot{width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 20px var(--accent)}
+    .controls{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+
+    /* Buttons */
+    .btn{cursor:pointer; border:none; border-radius:16px; padding:10px 14px; background:var(--card); color:var(--fg); box-shadow:var(--shadow); font-weight:600}
+    .btn:hover{filter:brightness(1.1)}
+    .btn.secondary{background:#1b1f2b; color:#e2e3ea}
+    .btn.ghost{background:transparent; border:1px solid #2b3040}
+
+    /* Stage */
+    .stage{position:relative; width:100%; height:100%; overflow:hidden;}
+    .slide{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; opacity:0;}
+    .slide img{max-width:100%; max-height:100%; object-fit:contain; border-radius:18px; box-shadow:var(--shadow)}
+    .slide.active{opacity:1}
+
+    /* Caption */
+    .caption{position:absolute; left:50%; bottom:40px; transform:translateX(-50%); padding:8px 14px; border-radius:14px; background:rgba(12,12,18,.45); border:1px solid rgba(255,255,255,.08); color:#fff; box-shadow:var(--shadow); font-size:14px}
+
+    /* Couple names (elegant) */
+    .names{position:absolute; top:24px; left:50%; transform:translateX(-50%); font-family:"Great Vibes", cursive; font-size:42px; letter-spacing:1px; color:#fff; text-shadow:0 6px 22px rgba(0,0,0,.45)}
+    .names .amp{color:var(--accent)}
+
+    /* Lyric ticker */
+    .lyric{position:absolute; left:50%; bottom:82px; transform:translateX(-50%); white-space:nowrap; max-width:80%; overflow:hidden;}
+    .lyric .inner{display:inline-block; padding:6px 12px; border-radius:14px; background:rgba(0,0,0,.35); border:1px solid rgba(255,255,255,.08)}
+    .lyric.marquee .inner{animation:marquee 18s linear infinite}
+    @keyframes marquee { 0%{transform:translateX(40%)} 100%{transform:translateX(-100%)} }
+
+    /* Effects */
+    .fx-fade{animation:fade 1s ease forwards}
+    @keyframes fade{from{opacity:0}to{opacity:1}}
+
+    .fx-zoom-in img{animation:kenburns-zoom-in var(--dur,8s) ease-in-out forwards}
+    @keyframes kenburns-zoom-in{from{transform:scale(1) translateZ(0)}to{transform:scale(1.12) translateZ(0)}}
+
+    .fx-zoom-out img{animation:kenburns-zoom-out var(--dur,8s) ease-in-out forwards}
+    @keyframes kenburns-zoom-out{from{transform:scale(1.12)}to{transform:scale(1)}}
+
+    .fx-pan-left img{animation:pan-left var(--dur,8s) ease-in-out forwards}
+    @keyframes pan-left{from{transform:translateX(5%) scale(1.06)}to{transform:translateX(-5%) scale(1.06)}}
+
+    .fx-pan-right img{animation:pan-right var(--dur,8s) ease-in-out forwards}
+    @keyframes pan-right{from{transform:translateX(-5%) scale(1.06)}to{transform:translateX(5%) scale(1.06)}}
+
+    .fx-tilt img{animation:tilt var(--dur,8s) ease-in-out forwards}
+    @keyframes tilt{from{transform:rotate(-.6deg) scale(1.05)}to{transform:rotate(.6deg) scale(1.05)}}
+
+    /* Progress bar */
+    .progress{height:4px; width:260px; border-radius:999px; background:#262a39; overflow:hidden}
+    .progress .bar{height:100%; width:0%; background:linear-gradient(90deg, #ff7ab6, #ffd17a); transition:width .2s linear}
+
+    input[type=file]{display:none}
+    .file-label{cursor:pointer}
+    .muted{color:var(--muted)}
+
+    /* Export status */
+    .export-log{font-size:12px; max-width:48ch}
+    .offline{color:#ffb4b4}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand"><span class="dot"></span> AI Smart Slideshow <span class="muted">• Wedding</span></div>
+      <div class="controls">
+        <label class="btn ghost file-label" for="fileInput">+ Ảnh</label>
+        <input id="fileInput" type="file" accept="image/*" multiple>
+
+        <label class="btn ghost file-label" for="audioInput">♪ Nhạc nền</label>
+        <input id="audioInput" type="file" accept="audio/*">
+        <button class="btn secondary" id="btnAudioToggle">Phát nhạc</button>
+        <label class="muted">Âm lượng <input type="range" id="vol" min="0" max="1" step="0.01" value="0.6"></label>
+      </div>
+      <div class="controls">
+        <input id="groom" class="btn ghost" placeholder="Tên chú rể" style="width:150px">
+        <span class="muted">&amp;</span>
+        <input id="bride" class="btn ghost" placeholder="Tên cô dâu" style="width:150px">
+        <input id="dateStr" class="btn ghost" placeholder="Ngày cưới (tuỳ chọn)" style="width:170px">
+      </div>
+      <div class="controls" style="flex:1; min-width:240px">
+        <input id="lyric" class="btn ghost" placeholder="Lời bài hát / caption chạy chữ" style="width:100%">
+        <label class="muted"><input type="checkbox" id="chkMarquee" checked> Chạy chữ (marquee)</label>
+      </div>
+      <div class="controls">
+        <button class="btn" id="btnStart">Bắt đầu</button>
+        <button class="btn secondary" id="btnPause">Tạm dừng</button>
+        <button class="btn secondary" id="btnPrev">◀</button>
+        <button class="btn secondary" id="btnNext">▶</button>
+        <span class="muted" id="mlState">ML: đang tải mô hình…</span>
+      </div>
+    </header>
+
+    <main class="stage" id="stage">
+      <div class="names" id="names"></div>
+      <div class="lyric" id="lyricBox"><span class="inner" id="lyricInner"></span></div>
+      <div class="caption" id="caption">Chọn ảnh/nhạc và nhấn “Bắt đầu”</div>
+    </main>
+
+    <footer>
+      <div class="controls">
+        <div class="progress"><div class="bar" id="progressBar"></div></div>
+        <div class="muted" id="info">0 ảnh | Hiệu ứng: --</div>
+      </div>
+      <div class="controls">
+        <button class="btn" id="btnRecord">Ghi lại (WebM)</button>
+        <button class="btn secondary" id="btnToMp4">Chuyển MP4 (ffmpeg.wasm)</button>
+        <a id="downloadLink" class="btn ghost" download="slideshow.webm" style="display:none">Tải video</a>
+      </div>
+      <div class="export-log muted" id="exportLog"></div>
+    </footer>
+  </div>
+
+<script>
+// === Config ===
+const DURATION_MS = 7000;   // thời gian mỗi ảnh (ms)
+const XFADE_MS   = 800;     // thời gian mờ dần giữa 2 ảnh
+const FPS_EXPORT = 30;      // fps khi ghi video
+
+let model = null;           // MobileNet
+let running = false;        // trạng thái trình chiếu
+let timer = null;           // interval
+let progressTimer = null;   // progress bar update
+let idx = 0;                // index
+let slides = [];            // {url,name}
+let featureCache = new Map();
+let audioEl = new Audio();
+let mediaRecorder = null;   // MediaRecorder for WebM
+let recordedChunks = [];    // blobs
+let ffmpeg = null;          // ffmpeg wasm instance or 'UNAVAILABLE'
+
+const stage = document.getElementById('stage');
+const caption = document.getElementById('caption');
+const info = document.getElementById('info');
+const progressBar = document.getElementById('progressBar');
+const fileInput = document.getElementById('fileInput');
+const audioInput = document.getElementById('audioInput');
+const namesBox = document.getElementById('names');
+const lyricBox = document.getElementById('lyricBox');
+const lyricInner = document.getElementById('lyricInner');
+const exportLog = document.getElementById('exportLog');
+const downloadLink = document.getElementById('downloadLink');
+
+// ===== Helper: dynamic fallback loaders for external libs =====
+function loadScriptOnce(url){
+  return new Promise((resolve,reject)=>{
+    const s = document.createElement('script');
+    s.src = url; s.async = true;
+    s.onload = ()=> resolve();
+    s.onerror = ()=> reject(new Error('Load failed: '+url));
+    document.head.appendChild(s);
+  });
+}
+
+(async function ensureExternalLibs(){
+  // Fallback CDNs if primary blocked or offline then online again
+  if (!window.tf){
+    try { await loadScriptOnce('https://unpkg.com/@tensorflow/tfjs@4.20.0/dist/tf.min.js'); } catch(e){ console.warn(e.message); }
+  }
+  if (!window.mobilenet){
+    try { await loadScriptOnce('https://unpkg.com/@tensorflow-models/mobilenet@2.1.0'); } catch(e){ console.warn(e.message); }
+  }
+  if (!window.FFmpeg){
+    try { await loadScriptOnce('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js'); } catch(e){ console.warn(e.message); }
+  }
+})();
+
+// === Load TF model (with graceful fallback) ===
+(async () => {
+  try {
+    if (!window.mobilenet) throw new Error('mobilenet lib not loaded');
+    model = await mobilenet.load({version:2, alpha:1.0});
+    document.getElementById('mlState').textContent = 'ML: sẵn sàng';
+  } catch (e){
+    console.warn('MobileNet load failed:', e?.message || e);
+    document.getElementById('mlState').textContent = 'ML: không tải được (vẫn chạy mặc định)';
+  }
+})();
+
+// === Inputs ===
+function readFiles(files){
+  slides = [];
+  for (const f of files){
+    if (!f.type.startsWith('image/')) continue;
+    const url = URL.createObjectURL(f);
+    slides.push({url, name:f.name});
+  }
+  info.textContent = `${slides.length} ảnh | Hiệu ứng: --`;
+}
+fileInput.addEventListener('change', e => readFiles(e.target.files));
+
+// Audio load
+audioInput.addEventListener('change', e =>{
+  const f = e.target.files?.[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  audioEl.src = url; audioEl.loop = true; audioEl.volume = parseFloat(vol.value || '0.6');
+});
+
+btnAudioToggle.addEventListener('click', async ()=>{
+  if (!audioEl.src){ alert('Hãy chọn file nhạc nền.'); return; }
+  if (audioEl.paused){ await audioEl.play().catch(()=>{}); btnAudioToggle.textContent = 'Tắt nhạc'; }
+  else { audioEl.pause(); btnAudioToggle.textContent = 'Phát nhạc'; }
+});
+vol.addEventListener('input', e=>{ audioEl.volume = parseFloat(e.target.value); });
+
+// Names / lyric binding
+function updateNames(){
+  const groom = document.getElementById('groom').value?.trim();
+  const bride = document.getElementById('bride').value?.trim();
+  const dateStr = document.getElementById('dateStr').value?.trim();
+  const center = [groom, bride].filter(Boolean).join('  ')+ (dateStr? `  •  ${dateStr}`: '');
+  namesBox.innerHTML = center ? `${groom || ''} <span class="amp">&amp;</span> ${bride || ''}${dateStr? `<span class="muted" style="font-family:Poppins;font-size:16px;margin-left:12px">${dateStr}</span>`:''}` : '';
+}
+['groom','bride','dateStr'].forEach(id=> document.getElementById(id).addEventListener('input', updateNames));
+
+function updateLyric(){
+  const text = document.getElementById('lyric').value || '';
+  lyricInner.textContent = text;
+  lyricBox.classList.toggle('marquee', document.getElementById('chkMarquee').checked);
+}
+['lyric','chkMarquee'].forEach(id=> document.getElementById(id).addEventListener('input', updateLyric));
+
+// === DOM Slide utils ===
+function createSlide(url){
+  const div = document.createElement('div');
+  div.className = 'slide';
+  const img = document.createElement('img');
+  img.decoding = 'async';
+  img.loading = 'lazy';
+  img.src = url;
+  div.appendChild(img);
+  return div;
+}
+
+// Compute simple stats
+function computeSimpleStats(img){
+  const c = document.createElement('canvas');
+  const ratio = img.naturalWidth / img.naturalHeight;
+  const w = c.width = Math.min(img.naturalWidth, 320);
+  const h = c.height = Math.round(w / ratio);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0,0,w,h).data;
+  let sumL=0, sumSat=0, n = w*h;
+  for (let i=0;i<data.length;i+=4){
+    const r=data[i], g=data[i+1], b=data[i+2];
+    const L = 0.2126*r + 0.7152*g + 0.0722*b; sumL+=L;
+    const maxc = Math.max(r,g,b), minc = Math.min(r,g,b);
+    const sat = maxc ? (maxc - minc)/maxc : 0; sumSat+=sat;
+  }
+  return {brightness:sumL/(n*255), saturation:sumSat/n};
+}
+
+async function classifyImage(img){
+  if (!model) return [];
+  try{ return await model.classify(img); }catch(e){ console.warn('classify failed', e?.message || e); return []; }
+}
+
+function chooseEffect(features){
+  const {brightness=0.5, saturation=0.5, topClass=""} = features;
+  if (/person|bride|groom|gown|suit|portrait/i.test(topClass)) return 'fx-zoom-in';
+  if (/mountain|valley|lake|beach|ocean|landscape|outdoor/i.test(topClass)) return (Math.random() > .5 ? 'fx-pan-left' : 'fx-pan-right');
+  if (saturation > 0.45 && brightness > 0.55) return 'fx-tilt';
+  if (brightness < 0.35) return 'fx-zoom-out';
+  return 'fx-fade';
+}
+
+async function extractFeatures(url){
+  if (featureCache.has(url)) return featureCache.get(url);
+  const tmp = new Image();
+  tmp.crossOrigin = 'anonymous';
+  tmp.src = url;
+  await tmp.decode();
+  const stats = computeSimpleStats(tmp);
+  const preds = await classifyImage(tmp);
+  const topClass = preds?.[0]?.className || '';
+  const features = {brightness:stats.brightness, saturation:stats.saturation, topClass};
+  featureCache.set(url, features);
+  return features;
+}
+
+function clearStage(){ stage.querySelectorAll('.slide').forEach(el => el.remove()); }
+function setProgress(ms){ progressBar.style.width = Math.min(100, Math.max(0, 100*ms/DURATION_MS)) + '%'; }
+
+async function showSlide(i){
+  if (!slides.length) return;
+  const item = slides[i % slides.length];
+  const slide = createSlide(item.url);
+  slide.style.setProperty('--dur', (DURATION_MS/1000)+'s');
+  stage.appendChild(slide);
+
+  await new Promise(res => {
+    const img = slide.querySelector('img');
+    if (img.complete) return res();
+    img.onload = () => res();
+    img.onerror = () => res();
+  });
+
+  const features = await extractFeatures(item.url);
+  const fx = chooseEffect(features);
+  slide.classList.add('active', fx);
+
+  caption.textContent = features.topClass ? `Hiệu ứng: ${fx.replace('fx-','')} • ML: ${features.topClass}` : `Hiệu ứng: ${fx.replace('fx-','')} (mặc định)`;
+  info.textContent = `${slides.length} ảnh | Hiệu ứng: ${fx.replace('fx-','')}`;
+
+  const oldSlides = Array.from(stage.querySelectorAll('.slide')).slice(0,-1);
+  oldSlides.forEach(el => {
+    el.style.transition = `opacity ${XFADE_MS}ms ease`;
+    el.style.opacity = 0;
+    setTimeout(()=> el.remove(), XFADE_MS + 50);
+  });
+}
+
+function startProgress(){
+  let elapsed = 0; setProgress(0);
+  clearInterval(progressTimer);
+  progressTimer = setInterval(()=>{ if (!running) return; elapsed += 200; setProgress(elapsed); }, 200);
+}
+
+async function startShow(){
+  if (!slides.length){ alert('Hãy chọn ít nhất 1 ảnh.'); return; }
+  running = true; clearStage(); await showSlide(idx); startProgress();
+  clearInterval(timer);
+  timer = setInterval(async ()=>{ if (!running) return; idx = (idx + 1) % slides.length; await showSlide(idx); startProgress(); }, DURATION_MS);
+  // đồng bộ audio
+  if (audioEl.src && audioEl.paused) audioEl.play().catch(()=>{});
+}
+
+btnStart.addEventListener('click', ()=>{ idx = 0; startShow(); });
+btnPause.addEventListener('click', ()=>{ running = !running; btnPause.textContent = running ? 'Tạm dừng' : 'Tiếp tục'; if (audioEl.src){ running ? audioEl.play().catch(()=>{}) : audioEl.pause(); }});
+btnNext.addEventListener('click', async ()=>{ if (!slides.length) return; running = false; idx = (idx + 1) % slides.length; await showSlide(idx); });
+btnPrev.addEventListener('click', async ()=>{ if (!slides.length) return; running = false; idx = (idx - 1 + slides.length) % slides.length; await showSlide(idx); });
+
+// Drag-drop
+window.addEventListener('dragover', e=> e.preventDefault());
+window.addEventListener('drop', e=>{ e.preventDefault(); if (e.dataTransfer.files?.length){ readFiles(e.dataTransfer.files); }});
+
+// ============ Recording (WebM) ============
+const recCanvas = document.createElement('canvas');
+recCanvas.width = 1280; recCanvas.height = 720; // 720p
+const recCtx = recCanvas.getContext('2d');
+
+async function drawFrameToCanvas(){
+  const img = stage.querySelector('.slide:last-child img');
+  if (img){
+    const cw = recCanvas.width, ch = recCanvas.height;
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const scale = Math.min(cw/iw, ch/ih);
+    const dw = iw*scale, dh = ih*scale;
+    const dx = (cw - dw)/2, dy = (ch - dh)/2;
+    recCtx.clearRect(0,0,cw,ch);
+    recCtx.drawImage(img, dx, dy, dw, dh);
+  } else {
+    recCtx.fillStyle = '#111'; recCtx.fillRect(0,0,recCanvas.width, recCanvas.height);
+  }
+  // overlay names
+  if (namesBox.textContent){
+    recCtx.save(); recCtx.font = '48px "Great Vibes"'; recCtx.textAlign = 'center'; recCtx.fillStyle = '#ffffff';
+    recCtx.shadowColor = 'rgba(0,0,0,.45)'; recCtx.shadowBlur = 16;
+    const flatNames = namesBox.innerText.replace(/\n/g,' ');
+    recCtx.fillText(flatNames, recCanvas.width/2, 70);
+    recCtx.restore();
+  }
+  // overlay lyric
+  const text = lyricInner.textContent?.trim();
+  if (text){
+    recCtx.save(); recCtx.font = '18px Poppins'; recCtx.textAlign = 'center';
+    recCtx.fillStyle = 'rgba(255,255,255,.95)';
+    const t = performance.now()/1000;
+    const shift = (t*120) % (recCanvas.width + text.length*9);
+    const x = recCanvas.width - shift + recCanvas.width*0.2;
+    const y = recCanvas.height - 90;
+    recCtx.fillStyle = 'rgba(0,0,0,.35)';
+    const pad = 10; const metrics = recCtx.measureText(text); const w = metrics.width + pad*2; const h = 28 + pad*2;
+    recCtx.fillRect((recCanvas.width-w)/2, y-22-pad, w, h);
+    recCtx.fillStyle = '#fff';
+    recCtx.fillText(text, x, y);
+    recCtx.restore();
+  }
+}
+
+async function recordWebM(){
+  if (!slides.length){ alert('Hãy chọn ảnh trước.'); return; }
+  exportLog.textContent = 'Đang ghi…'; recordedChunks = [];
+  const stream = recCanvas.captureStream(FPS_EXPORT);
+
+  // Mix in audio if available
+  if (audioEl.src){
+    const audioStream = audioEl.captureStream?.() || audioEl.mozCaptureStream?.();
+    if (audioStream){
+      audioStream.getAudioTracks().forEach(t => stream.addTrack(t));
+      if (audioEl.paused) await audioEl.play().catch(()=>{});
+    }
+  }
+
+  mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+  mediaRecorder.ondataavailable = (e)=>{ if (e.data.size>0) recordedChunks.push(e.data); };
+  mediaRecorder.onstop = ()=>{
+    const blob = new Blob(recordedChunks, {type:'video/webm'});
+    const url = URL.createObjectURL(blob);
+    downloadLink.href = url; downloadLink.download = 'slideshow.webm';
+    downloadLink.style.display = 'inline-flex';
+    exportLog.textContent = 'Đã ghi xong (WebM). Có thể chuyển MP4 bằng ffmpeg.wasm.';
+  };
+  mediaRecorder.start();
+
+  const totalMs = slides.length * DURATION_MS;
+  const startT = performance.now();
+  idx = 0; await showSlide(idx);
+
+  const render = async () =>{
+    const now = performance.now();
+    const elapsed = now - startT;
+    await drawFrameToCanvas();
+    if (elapsed >= (idx+1)*DURATION_MS && idx < slides.length-1){ idx++; await showSlide(idx); }
+    if (elapsed < totalMs){ requestAnimationFrame(render); }
+    else { mediaRecorder.stop(); }
+  };
+  requestAnimationFrame(render);
+}
+
+btnRecord.addEventListener('click', recordWebM);
+
+// ============ ffmpeg.wasm: WebM -> MP4 (with multi-CDN + offline guards) ============
+async function ensureFFmpeg(){
+  if (ffmpeg && ffmpeg !== 'UNAVAILABLE') return ffmpeg;
+  if (!navigator.onLine){
+    ffmpeg = 'UNAVAILABLE';
+    throw new Error('Bạn đang ngoại tuyến. Hãy kết nối Internet để tải FFmpeg.');
+  }
+  if (!window.FFmpeg){
+    // script tag failed – try alternate CDN
+    try { await loadScriptOnce('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/ffmpeg.min.js'); }
+    catch(e){ console.warn('FFmpeg script fallback failed:', e?.message || e); }
+    if (!window.FFmpeg){
+      ffmpeg = 'UNAVAILABLE';
+      throw new Error('Không tải được thư viện FFmpeg JS từ CDN.');
+    }
+  }
+  const { createFFmpeg } = FFmpeg;
+  const candidates = [
+    'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/ffmpeg-core.js',
+    'https://unpkg.com/@ffmpeg/core@0.12.10/dist/ffmpeg-core.js'
+  ];
+  let lastErr = null;
+  for (const corePath of candidates){
+    try {
+      const inst = createFFmpeg({ log: true, corePath });
+      await inst.load();
+      ffmpeg = inst; return ffmpeg;
+    } catch(e){ lastErr = e; console.warn('FFmpeg core load failed:', corePath, e?.message || e); }
+  }
+  ffmpeg = 'UNAVAILABLE';
+  throw new Error('Không tải được FFmpeg core từ các CDN.');
+}
+
+btnToMp4.addEventListener('click', async ()=>{
+  if (!recordedChunks.length){ alert('Chưa có WebM để chuyển. Hãy bấm "Ghi lại (WebM)" trước.'); return; }
+  try{
+    exportLog.textContent = 'Đang chuyển WebM → MP4…';
+    const webmBlob = new Blob(recordedChunks, {type:'video/webm'});
+    const arrayBuffer = await webmBlob.arrayBuffer();
+    const u8 = new Uint8Array(arrayBuffer);
+    const ff = await ensureFFmpeg();
+    ff.FS('writeFile', 'in.webm', u8);
+    await ff.run('-i', 'in.webm', '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', 'out.mp4');
+    const out = ff.FS('readFile', 'out.mp4');
+    const mp4Blob = new Blob([out.buffer], {type:'video/mp4'});
+    const url = URL.createObjectURL(mp4Blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'slideshow.mp4'; a.click();
+    exportLog.textContent = 'Đã xuất MP4.';
+  }catch(err){
+    const msg = (err && err.message) ? err.message : 'Không rõ nguyên nhân';
+    exportLog.innerHTML = `<span class="offline">Lỗi chuyển MP4: ${msg}</span> — gợi ý: kiểm tra mạng/CDN hoặc dùng WebM trực tiếp.`;
+  }
+});
+
+// ================== Self-tests (additive) ==================
+function runSelfTests(){
+  const results = [];
+  const log = (name, ok, detail='') => { results.push({name, ok, detail}); console[ok?'log':'error'](`Test: ${name} → ${ok?'OK':'FAIL'} ${detail}`); };
+  try {
+    const sample = 'A\n&B\n2026';
+    const got = sample.replace(/\n/g,' ');
+    log('Regex newline replacement', !/\n/.test(got) && got.includes('&') && got.split(' ').length>=3);
+  } catch(e){ log('Regex newline replacement', false, e.message); }
+
+  try {
+    const fx1 = chooseEffect({topClass:'person'});
+    log('Effect mapping – portrait', fx1==='fx-zoom-in', fx1);
+  } catch(e){ log('Effect mapping – portrait', false, e.message); }
+
+  try {
+    const fx2 = chooseEffect({brightness:0.2, saturation:0.1, topClass:''});
+    log('Effect mapping – dark image → zoom-out', fx2==='fx-zoom-out', fx2);
+  } catch(e){ log('Effect mapping – dark image → zoom-out', false, e.message); }
+
+  try {
+    const el = createSlide('data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==');
+    const ok = el && el.className==='slide' && el.querySelector('img');
+    log('createSlide structure', !!ok);
+  } catch(e){ log('createSlide structure', false, e.message); }
+
+  // New tests: lyric toggle + names rendering basics (no network)
+  try {
+    document.getElementById('groom').value = 'Anh';
+    document.getElementById('bride').value = 'Em';
+    document.getElementById('dateStr').value = '11/04/2026';
+    updateNames();
+    const ok = /Anh/.test(namesBox.innerHTML) && /Em/.test(namesBox.innerHTML) && /2026/.test(namesBox.innerHTML);
+    log('updateNames renders names + date', ok, namesBox.innerHTML);
+  } catch(e){ log('updateNames renders names + date', false, e.message); }
+
+  try {
+    document.getElementById('lyric').value = 'Từng là tất cả';
+    document.getElementById('chkMarquee').checked = true; updateLyric();
+    const ok = lyricBox.classList.contains('marquee') && /Từng là/.test(lyricInner.textContent);
+    log('Lyric marquee toggle ON', ok);
+    document.getElementById('chkMarquee').checked = false; updateLyric();
+    const ok2 = !lyricBox.classList.contains('marquee');
+    log('Lyric marquee toggle OFF', ok2);
+  } catch(e){ log('Lyric marquee toggle', false, e.message); }
+
+  const okCount = results.filter(r=>r.ok).length;
+  const total = results.length;
+  exportLog.textContent = `Self-tests: ${okCount}/${total} passed`;
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', runSelfTests); else runSelfTests();
+</script>
+</body>
+</html>
