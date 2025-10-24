@@ -3,14 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Slideshow đơn giản</title>
+  <title>DẠM NGÕ VĂN VŨ & ANH THƯ</title>
+  <link rel="icon"
+  href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%E2%9D%A4%EF%B8%8F%3C/text%3E%3C/svg%3E">
+
   <style>
     html, body { height: 100%; margin: 0; background: #fff; }
     body { display: grid; place-items: center; overflow: hidden; cursor: none; }
 
     /* Frame để tránh rìa ảnh khi animate */
     .frame { width: 90vw; height: 90vh;margin: 0px auto; inset: 0; overflow: hidden; display: grid; place-items: center; }
-    .frame img { width: 100vw; height: 100vh; object-fit: contain; display: block; backface-visibility: hidden; will-change: transform, opacity; }
+    .frame img { width: 90vw; height: 90vh;margin: 0px auto; object-fit: contain; display: block; backface-visibility: hidden; will-change: transform, opacity; }
 
     /* Overlay nhắc bật âm thanh (không có nút, chỉ click bất kỳ) */
     #overlay { position: fixed; inset: 0; display: none; place-items: center; background: rgba(0,0,0,.7); color: #fff; font: 600 18px system-ui, -apple-system, Segoe UI, Roboto, Arial; letter-spacing: .2px; }
