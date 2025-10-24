@@ -42,6 +42,149 @@
 
   <!-- Overlay yêu cầu người dùng click để bật âm thanh nếu bị chặn autoplay -->
   <div id="overlay"><div class="card">Chạm bất kỳ để phát nhạc nền…</div></div>
+<!-- FIREWORKS (pháo hoa giấy) -->
+<canvas id="fx-canvas" aria-hidden="true"></canvas>
+
+<style>
+  /* Canvas phủ toàn màn hình, trên ảnh nhưng dưới overlay thông báo */
+  #fx-canvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    display: block;
+  }
+</style>
+
+<script>
+  (function(){
+    const canvas = document.getElementById('fx-canvas');
+    const ctx = canvas.getContext('2d');
+    let W = 0, H = 0, DPR = Math.max(1, window.devicePixelRatio || 1);
+    function resize(){
+      W = window.innerWidth; H = window.innerHeight;
+      canvas.width = Math.floor(W * DPR);
+      canvas.height = Math.floor(H * DPR);
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    window.addEventListener('resize', resize, {passive:true});
+    resize();
+
+    // particle definition: small rotated rectangles (paper confetti)
+    class Particle {
+      constructor(x,y,angle,spread,color,size,life){
+        const speed = (Math.random()*0.8 + 0.8) * (1 + spread*0.5);
+        this.x = x; this.y = y;
+        this.vx = Math.cos(angle) * speed;
+        this.vy = Math.sin(angle) * speed;
+        this.size = size * (0.7 + Math.random()*0.6);
+        this.w = this.size * (0.6 + Math.random()*0.8);
+        this.h = this.size * (0.6 + Math.random()*0.8);
+        this.rot = Math.random()*Math.PI*2;
+        this.rotSpeed = (Math.random()-0.5) * 0.3;
+        this.color = color;
+        this.life = life;
+        this.age = 0;
+        this.gravity = 0.02 + Math.random()*0.04;
+        this.drag = 0.995;
+      }
+      update(dt){
+        this.age += dt;
+        this.vx *= this.drag;
+        this.vy += this.gravity * dt * 60;
+        this.x += this.vx * dt * 60;
+        this.y += this.vy * dt * 60;
+        this.rot += this.rotSpeed * dt * 60;
+      }
+      draw(ctx){
+        const t = Math.min(1, this.age / this.life);
+        const alpha = 1 - t;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(this.x, this.y);
+        ctx.rotate(this.rot);
+        ctx.fillStyle = this.color;
+        ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
+        ctx.restore();
+      }
+      isDead(){ return this.age >= this.life || this.y - this.h > H + 50; }
+    }
+
+    const colors = [
+      '#ff5d5d','#ffd166','#6ee7b7','#60a5fa','#c084fc',
+      '#ffb4a2','#f7b267','#99ddcc','#7dd3fc','#e879f9'
+    ];
+
+    let particles = [];
+
+    // spawn a "burst" like a paper firework at x,y
+    function burst(x,y, count = 40, spread = 1.2, speed = 1){
+      for(let i=0;i<count;i++){
+        const angle = (Math.random()*Math.PI*2);
+        const color = colors[Math.floor(Math.random()*colors.length)];
+        const size = 6 + Math.random()*8;
+        const life = 1.6 + Math.random()*1.6; // seconds
+        particles.push(new Particle(x, y, angle, spread*speed, color, size, life));
+      }
+    }
+
+    // periodic automatic bursts (like fireworks)
+    let lastAuto = 0;
+    function maybeAutoSpawn(time){
+      if(time - lastAuto > 800 + Math.random()*1400){
+        lastAuto = time;
+        // spawn from near lower center upward arc for effect
+        const x = (0.25 + Math.random()*0.5) * W;
+        const y = (0.18 + Math.random()*0.12) * H;
+        burst(x, y, 36 + Math.floor(Math.random()*28), 1.6, 1.2);
+      }
+    }
+
+    // spawn burst on user pointer (optional)
+    window.addEventListener('pointerdown', (e)=>{
+      burst(e.clientX, e.clientY, 28, 1.8, 1.2);
+    });
+
+    // animation loop
+    let last = performance.now();
+    function loop(now){
+      const dt = Math.min(0.06, (now - last) / 1000);
+      last = now;
+
+      // auto spawn occasionally
+      maybeAutoSpawn(now);
+
+      // update
+      for(let i=particles.length-1;i>=0;i--){
+        const p = particles[i];
+        p.update(dt);
+        if(p.isDead()) particles.splice(i,1);
+      }
+
+      // draw
+      ctx.clearRect(0,0,W,H);
+      for(const p of particles) p.draw(ctx);
+
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    // small helper: celebrate when music starts (if autoplay succeeded)
+    const audio = document.getElementById('bgm');
+    if(audio){
+      audio.addEventListener('play', ()=> {
+        // quick multi-burst celebration
+        const cx = W/2, cy = H*0.22;
+        for(let k=0;k<3;k++){
+          setTimeout(()=> burst(cx + (Math.random()-0.5)*200, cy + (Math.random()-0.5)*60, 50, 2, 1.4), k*220);
+        }
+      }, {once:true});
+    }
+
+  })();
+</script>
 
   <script>
     (async function(){
