@@ -3,217 +3,86 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Slideshow Fullscreen + Nhạc nền</title>
+  <title>Slideshow đơn giản</title>
   <style>
-    :root { --bg:#0b0c10; --ui:#10121a; --fg:#f1f3f9; --muted:#a7adbb; --accent:#ff82b2; }
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    html, body { height: 100%; margin: 0; background: #fff; }
+    body { display: grid; place-items: center; overflow: hidden; cursor: none; }
 
-    /* Stage */
-    #stage { position: fixed; inset: 0; overflow: hidden; background: radial-gradient(1200px 800px at 70% 30%, #0f1320, #090a0f 70%); }
-    .slide { position: absolute; inset: 0; display: grid; place-items: center; opacity: 0; transition: opacity 800ms ease; }
-    .slide.active { opacity: 1; }
-    .slide img { width: 100vw; height: 100vh; object-fit: cover; }
+    /* Frame để tránh rìa ảnh khi animate */
+    .frame { width: 90vw; height: 90vh;margin: 0px auto; inset: 0; overflow: hidden; display: grid; place-items: center; }
+    .frame img { width: 100vw; height: 100vh; object-fit: contain; display: block; backface-visibility: hidden; will-change: transform, opacity; }
 
-    /* Top overlay */
-    .topbar { position: fixed; left: 0; right: 0; top: 0; display: flex; gap: 8px; align-items: center; padding: 8px 10px; background: linear-gradient(180deg, rgba(8,10,18,.75), rgba(8,10,18,0)); z-index: 10; }
-    .spacer { flex: 1; }
-    .btn { appearance: none; border: 1px solid #2a3144; background: #121523; color: var(--fg); padding: 8px 12px; border-radius: 12px; cursor: pointer; font-weight: 600; }
-    .btn:hover { filter: brightness(1.08); }
-    .file { display: none; }
-    .file-label { cursor: pointer; }
-    .muted { color: var(--muted); font-size: 12px; }
+    /* Overlay nhắc bật âm thanh (không có nút, chỉ click bất kỳ) */
+    #overlay { position: fixed; inset: 0; display: none; place-items: center; background: rgba(0,0,0,.7); color: #fff; font: 600 18px system-ui, -apple-system, Segoe UI, Roboto, Arial; letter-spacing: .2px; }
+    #overlay .card { padding: 16px 22px; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; background: rgba(15,15,20,.6); }
 
-    /* Help hint */
-    .hint { position: fixed; right: 12px; bottom: 12px; background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.08); padding: 8px 10px; border-radius: 10px; font-size: 12px; z-index: 10; }
+    /* === Hiệu ứng (5 kiểu) === */
+    .fx-fade   { animation: fade 7s ease-in-out infinite; }
+    .fx-zoom-in  { animation: zoomIn 7s ease-in-out infinite; }
+    .fx-zoom-out { animation: zoomOut 7s ease-in-out infinite; }
+    .fx-pan-left { animation: panLeft 7s ease-in-out infinite; }
+    .fx-pan-right{ animation: panRight 7s ease-in-out infinite; }
 
-    /* Start overlay for autoplay */
-    #startOverlay { position: fixed; inset: 0; display: grid; place-items: center; background: radial-gradient(1200px 800px at 70% 30%, rgba(14,16,26,.95), rgba(6,7,12,.98)); z-index: 20; }
-    #startOverlay .card { text-align: center; background: #121523; border: 1px solid #2a3144; padding: 24px; border-radius: 16px; box-shadow: 0 10px 40px rgba(0,0,0,.45); }
-    #startOverlay h1 { margin: 0 0 8px; font-size: 20px; }
-    #startOverlay p { margin: 0 0 16px; color: var(--muted); }
-
-    /* Progress */
-    .progress { position: fixed; left: 50%; transform: translateX(-50%); bottom: 10px; width: min(60vw, 520px); height: 4px; border-radius: 999px; background: #20263a; overflow: hidden; z-index: 10; }
-    .bar { height: 100%; width: 0%; background: linear-gradient(90deg, #ff82b2, #ffd27e); transition: width .2s linear; }
-
-    @media (hover:none) { .hint { display: none; } }
+    @keyframes fade { 0%{opacity:.0} 10%{opacity:1} 90%{opacity:1} 100%{opacity:.0} }
+    @keyframes zoomIn { 0%{transform:scale(1)} 100%{transform:scale(1.1)} }
+    @keyframes zoomOut{ 0%{transform:scale(1.1)} 100%{transform:scale(1)} }
+    @keyframes panLeft{ 0%{transform:translateX(3%) } 100%{transform:translateX(-3%)} }
+    @keyframes panRight{0%{transform:translateX(-3%)} 100%{transform:translateX(3%) } }
   </style>
 </head>
 <body>
-  <!-- UI -->
-  <div class="topbar">
-    <label class="btn file-label" for="files">+ Ảnh</label>
-    <input id="files" class="file" type="file" accept="image/*" multiple>
+  <!-- Chỉ hiển thị duy nhất ảnh 1.jpg, full screen (không crop) -->
+  <div class="frame"><img id="photo" src="hinhanh/1.jpg" alt="Slideshow" /></div>
 
-    <label class="btn file-label" for="audio">♪ Nhạc nền</label>
-    <input id="audio" class="file" type="file" accept="audio/*">
+  <!-- Nhạc nền mặc định (tự động thử phát) -->
+  <audio id="bgm" src="audio/xứng đôi cưới thôi nhen.mp3" preload="auto" loop></audio>
 
-    <button id="btnPlay" class="btn">Bắt đầu</button>
-    <button id="btnPause" class="btn">Tạm dừng</button>
-    <button id="btnPrev" class="btn">◀</button>
-    <button id="btnNext" class="btn">▶</button>
-    <div class="spacer"></div>
-    <label class="muted">Âm lượng <input id="vol" type="range" min="0" max="1" step="0.01" value="0.6"></label>
-    <button id="btnFS" class="btn">⛶ Toàn màn hình</button>
-  </div>
-
-  <!-- Stage -->
-  <main id="stage"></main>
-  <div class="progress"><div class="bar" id="bar"></div></div>
-  <div class="hint">Phím tắt: Space phát/tạm dừng • ←/→ chuyển ảnh • F fullscreen • M tắt tiếng</div>
-
-  <!-- Autoplay guard overlay -->
-  <div id="startOverlay">
-    <div class="card">
-      <h1>Slideshow + Nhạc nền</h1>
-      <p>Tải ảnh & nhạc (hoặc dùng nhạc mặc định), sau đó bấm Bắt đầu.</p>
-      <button class="btn" id="btnStartOverlay">Bắt đầu</button>
-    </div>
-  </div>
+  <!-- Overlay yêu cầu người dùng click để bật âm thanh nếu bị chặn autoplay -->
+  <div id="overlay"><div class="card">Chạm bất kỳ để phát nhạc nền…</div></div>
 
   <script>
-  // ===== Config =====
-  const DURATION_MS = 7000; // mỗi ảnh 7s
-  const XFADE_MS = 800;     // mờ dần
+    (async function(){
+      const audio = document.getElementById('bgm');
+      const overlay = document.getElementById('overlay');
+      const img = document.getElementById('photo');
 
-  let images = [];     // [{url,name}]
-  let idx = 0;         // index ảnh hiện tại
-  let running = false; // trạng thái slideshow
-  let timer = null;    // interval
-  let progressTimer = null;
+      // Thử autoplay có tiếng; nếu bị chặn, hiện overlay và phát khi user tương tác
+      try { await audio.play(); }
+      catch (_) {
+        overlay.style.display = 'grid';
+        const enable = async () => {
+          overlay.style.display = 'none';
+          try { audio.muted = false; await audio.play(); } catch (e) {}
+          window.removeEventListener('pointerdown', enable);
+          window.removeEventListener('keydown', enable);
+        };
+        window.addEventListener('pointerdown', enable, { once: true });
+        window.addEventListener('keydown', enable, { once: true });
+      }
 
-  const stage = document.getElementById('stage');
-  const bar = document.getElementById('bar');
-  const files = document.getElementById('files');
-  const audioInput = document.getElementById('audio');
-  const btnPlay = document.getElementById('btnPlay');
-  const btnPause = document.getElementById('btnPause');
-  const btnPrev = document.getElementById('btnPrev');
-  const btnNext = document.getElementById('btnNext');
-  const btnFS = document.getElementById('btnFS');
-  const vol = document.getElementById('vol');
-  const startOverlay = document.getElementById('startOverlay');
-  const btnStartOverlay = document.getElementById('btnStartOverlay');
+      // Ẩn con trỏ sau 2s không hoạt động để trải nghiệm sạch sẽ
+      let hideTimer; const hide = ()=> document.body.style.cursor='none';
+      const show = ()=>{ document.body.style.cursor='auto'; clearTimeout(hideTimer); hideTimer=setTimeout(hide, 2000); };
+      window.addEventListener('mousemove', show);
+      hideTimer=setTimeout(hide, 2000);
 
-  const audio = new Audio();
-  audio.loop = true;
-  audio.volume = parseFloat(vol.value);
+      // ===== Thêm 5 hiệu ứng cho chính ảnh đó (luân phiên) =====
+      // Danh sách class hiệu ứng. Có thể xáo trộn nếu muốn ngẫu nhiên.
+      const effects = ['fx-fade','fx-zoom-in','fx-zoom-out','fx-pan-left','fx-pan-right'];
+      let i = 0;
+      function applyEffect(){
+        img.className = ''; // xoá class cũ
+        img.offsetHeight;   // force reflow để restart animation
+        img.classList.add(effects[i % effects.length]);
+        i++;
+      }
+      // Áp dụng ngay và lặp mỗi 7 giây
+      applyEffect();
+      setInterval(applyEffect, 7000);
 
-  const DEFAULT_AUDIO = [
-    'audio/xứng đôi cưới thôi nhen.mp3',
-    'audio/xung doi cuoi thoi nhen.mp3',
-    'audio/xung-doi-cuoi-thoi-nhen.mp3'
-  ];
-
-  function setProgress(ms){ bar.style.width = Math.min(100, Math.max(0, 100*ms/DURATION_MS)) + '%'; }
-  function clearStage(){ stage.querySelectorAll('.slide').forEach(el=> el.remove()); }
-
-  function createSlide(url){
-    const div = document.createElement('div');
-    div.className = 'slide';
-    const img = document.createElement('img');
-    img.decoding = 'async';
-    img.loading = 'eager';
-    img.src = url;
-    div.appendChild(img);
-    return div;
-  }
-
-  function readImagesFromInput(list){
-    images = [];
-    for (const f of list){
-      if (!f.type.startsWith('image/')) continue;
-      const url = URL.createObjectURL(f);
-      images.push({url, name: f.name});
-    }
-    idx = 0;
-  }
-
-  files.addEventListener('change', (e)=> {
-    readImagesFromInput(e.target.files);
-    if (images.length) showSlide(idx);
-  });
-
-  audioInput.addEventListener('change', (e)=>{
-    const f = e.target.files?.[0]; if (!f) return;
-    const url = URL.createObjectURL(f); audio.src = url; audio.play().catch(()=>{});
-  });
-
-  vol.addEventListener('input', ()=> audio.volume = parseFloat(vol.value));
-
-  async function probeDefaultAudio(){
-    for (const p of DEFAULT_AUDIO){
-      const ok = await new Promise(res=>{ const a = new Audio(); a.preload='auto'; a.src = p; a.addEventListener('canplaythrough', ()=> res(true), {once:true}); a.addEventListener('error', ()=> res(false), {once:true}); });
-      if (ok){ audio.src = p; return true; }
-    }
-    return false;
-  }
-
-  async function showSlide(i){
-    if (!images.length) return;
-    const item = images[i % images.length];
-    const el = createSlide(item.url);
-    stage.appendChild(el);
-    await new Promise(res=>{ const img = el.querySelector('img'); if (img.complete) res(); else { img.onload = ()=> res(); img.onerror = ()=> res(); }});
-    el.classList.add('active');
-    const olds = Array.from(stage.querySelectorAll('.slide')).slice(0,-1);
-    olds.forEach(o=>{ o.style.transition = `opacity ${XFADE_MS}ms ease`; o.style.opacity = 0; setTimeout(()=> o.remove(), XFADE_MS + 40); });
-  }
-
-  function startProgress(){
-    let elapsed = 0; setProgress(0);
-    clearInterval(progressTimer);
-    progressTimer = setInterval(()=>{ if(!running) return; elapsed += 200; setProgress(elapsed); }, 200);
-  }
-
-  async function start(){
-    if (!images.length){ alert('Hãy chọn ảnh trước.'); return; }
-    running = true; clearStage(); await showSlide(idx); startProgress();
-    clearInterval(timer);
-    timer = setInterval(async ()=>{ if(!running) return; idx = (idx + 1) % images.length; await showSlide(idx); startProgress(); }, DURATION_MS);
-    if (audio.src && audio.paused){ audio.play().catch(()=>{}); }
-  }
-
-  // Buttons
-  btnPlay.addEventListener('click', start);
-  btnPause.addEventListener('click', ()=>{ running = !running; btnPause.textContent = running ? 'Tạm dừng' : 'Tiếp tục'; if (audio.src){ running ? audio.play().catch(()=>{}) : audio.pause(); }});
-  btnNext.addEventListener('click', async ()=>{ if(!images.length) return; running = false; idx = (idx+1)%images.length; await showSlide(idx); });
-  btnPrev.addEventListener('click', async ()=>{ if(!images.length) return; running = false; idx = (idx-1+images.length)%images.length; await showSlide(idx); });
-
-  btnFS.addEventListener('click', ()=>{
-    const el = document.documentElement;
-    if (!document.fullscreenElement){ el.requestFullscreen?.(); }
-    else { document.exitFullscreen?.(); }
-  });
-
-  // Hotkeys
-  window.addEventListener('keydown', (e)=>{
-    if (e.key === ' ') { e.preventDefault(); btnPause.click(); }
-    if (e.key === 'ArrowRight') btnNext.click();
-    if (e.key === 'ArrowLeft') btnPrev.click();
-    if (e.key.toLowerCase() === 'f') btnFS.click();
-    if (e.key.toLowerCase() === 'm') audio.muted = !audio.muted;
-  });
-
-  // Drag & drop
-  window.addEventListener('dragover', e=> e.preventDefault());
-  window.addEventListener('drop', e=>{ e.preventDefault(); if (e.dataTransfer.files?.length){ readImagesFromInput(e.dataTransfer.files); if (images.length) showSlide(idx); }});
-
-  // Autoplay policy guard
-  btnStartOverlay.addEventListener('click', async ()=>{
-    startOverlay.style.display = 'none';
-    // Try default audio if none chosen
-    if (!audio.src) await probeDefaultAudio();
-    // if audio available, try play
-    if (audio.src) audio.play().catch(()=>{});
-  });
-
-  // Optional: URL param ?auto=1 will try to auto start if user clicks overlay
-  // (Cannot bypass overlay due to browser autoplay restrictions.)
-
-  // Self-test minimal (no UI break)
-  console.log('[self-test] captions not used, simple slideshow ready');
+      // Nếu ảnh đang bị "zoom/crop" ở bản trước do object-fit: cover,
+      // mình đã đổi sang object-fit: contain ở CSS để **không cắt ảnh** nữa.
+    })();
   </script>
 </body>
 </html>
