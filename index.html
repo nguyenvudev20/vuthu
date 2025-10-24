@@ -31,33 +31,117 @@
     @keyframes zoomOut{ 0%{transform:scale(1.1)} 100%{transform:scale(1)} }
     @keyframes panLeft{ 0%{transform:translateX(3%) } 100%{transform:translateX(-3%)} }
     @keyframes panRight{0%{transform:translateX(-3%)} 100%{transform:translateX(3%) } }
-  </style>
-</head>
-<body>
-  <!-- Chỉ hiển thị duy nhất ảnh 1.jpg, full screen (không crop) -->
-  <div class="frame"><img id="photo" src="hinhanh/1.jpg" alt="Slideshow" /></div>
+    </style>
 
-  <!-- Nhạc nền mặc định (tự động thử phát) -->
-  <audio id="bgm" src="audio/xứng đôi cưới thôi nhen.mp3" preload="auto" loop></audio>
+<script>
+  (function(){
+    const img = document.getElementById('photo');
+    const overlay = document.getElementById('overlay');
+    const audio = document.getElementById('bgm');
+    const frame = document.querySelector('.frame') || document.documentElement;
 
-  <!-- Overlay yêu cầu người dùng click để bật âm thanh nếu bị chặn autoplay -->
-  <div id="overlay"><div class="card">Chạm bất kỳ để phát nhạc nền…</div></div>
-<!-- FIREWORKS (pháo hoa giấy) -->
-<canvas id="fx-canvas" aria-hidden="true"></canvas>
+    // helper: cross-browser check for fullscreen element
+    function getFullscreenElement(){
+      return document.fullscreenElement
+        || document.webkitFullscreenElement
+        || document.msFullscreenElement
+        || document.mozFullScreenElement
+        || null;
+    }
 
-<style>
-  /* Canvas phủ toàn màn hình, trên ảnh nhưng dưới overlay thông báo */
-  #fx-canvas {
+    // enter fullscreen (attempts modern API first, falls back to prefixes)
+    async function enterFullscreen(el = document.documentElement){
+      try {
+        if (el.requestFullscreen) await el.requestFullscreen();
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen(); // Safari
+        else if (el.msRequestFullscreen) el.msRequestFullscreen();         // old IE/Edge
+        // try to start audio when entering fullscreen (user gesture contexts often allow)
+        if (audio && audio.paused) {
+          try { audio.muted = false; await audio.play(); } catch (e) { /* ignore */ }
+        }
+      } catch (err) {
+        // ignore errors (some browsers block without user gesture)
+      }
+    }
+
+    // exit fullscreen
+    function exitFullscreen(){
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      else if (document.msExitFullscreen) document.msExitFullscreen();
+    }
+
+    function toggleFullscreen(){
+      if (!getFullscreenElement()) enterFullscreen(frame);
+      else exitFullscreen();
+    }
+
+    // avoid toggling when typing inside inputs/textareas/contenteditable
+    function isTypingTarget(){
+      const el = document.activeElement;
+      if (!el) return false;
+      const t = (el.tagName || '').toLowerCase();
+      return t === 'input' || t === 'textarea' || el.isContentEditable;
+    }
+
+    // F key toggles fullscreen (ignore when typing)
+    window.addEventListener('keydown', (e) => {
+      if (e.key && e.key.toLowerCase() === 'f' && !isTypingTarget()) {
+        e.preventDefault();
+        toggleFullscreen();
+      }
+    }, { passive: true });
+
+    // double-click on the frame toggles fullscreen
+    frame.addEventListener('dblclick', (e) => {
+      toggleFullscreen();
+    });
+
+    // update UI on fullscreen change (cross-browser events)
+    function onFullscreenChange(){
+      const fs = !!getFullscreenElement();
+      // hide overlay if entering fullscreen
+      if (fs && overlay) overlay.style.display = 'none';
+      // ensure cursor visible briefly when entering fullscreen
+      if (fs) {
+        document.body.style.cursor = 'auto';
+        setTimeout(()=> document.body.style.cursor = 'none', 1500);
+      } else {
+        document.body.style.cursor = 'auto';
+      }
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    document.addEventListener('msfullscreenchange', onFullscreenChange);
+
+  })();
+</script>
+  </head>
+  <body>
+    <!-- Chỉ hiển thị duy nhất ảnh 1.jpg, full screen (không crop) -->
+    <div class="frame"><img id="photo" src="hinhanh/1.jpg" alt="Slideshow" /></div>
+
+    <!-- Nhạc nền mặc định (tự động thử phát) -->
+    <audio id="bgm" src="audio/xứng đôi cưới thôi nhen.mp3" preload="auto" loop></audio>
+
+    <!-- Overlay yêu cầu người dùng click để bật âm thanh nếu bị chặn autoplay -->
+    <div id="overlay"><div class="card">Chạm bất kỳ để phát nhạc nền…</div></div>
+  <!-- FIREWORKS (pháo hoa giấy) -->
+  <canvas id="fx-canvas" aria-hidden="true"></canvas>
+
+  <style>
+    /* Canvas phủ toàn màn hình, trên ảnh nhưng dưới overlay thông báo */
+    #fx-canvas {
     position: fixed;
     inset: 0;
     pointer-events: none;
     z-index: 5;
     display: block;
-  }
-</style>
+    }
+  </style>
 
-<script>
-  (function(){
+  <script>
+    (function(){
     const canvas = document.getElementById('fx-canvas');
     const ctx = canvas.getContext('2d');
     let W = 0, H = 0, DPR = Math.max(1, window.devicePixelRatio || 1);
